@@ -1,129 +1,188 @@
-#Sheen Kak 
-#CSCI 184 
-#Project code 
-
-
-# libraries 
+import streamlit as st
 import pandas as pd
-import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.model_selection import train_test_split, KFold
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.tree import export_graphviz
-from sklearn.metrics import accuracy_score, precision_score, recall_score, mean_absolute_error, mean_squared_error
-import pydot
-from PIL import Image
-import graphviz
-import tensorflow as tf
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense
-from tensorflow.keras.utils import plot_model
+import seaborn as sns
+
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import OneHotEncoder
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
 
 
-data = pd.read_csv( 'train.csv')
+# read in the file 
+tesla = pd.read_csv('tesla_used_car_sold-2022-08.csv')
+print(tesla) 
 
-def euclidean_distance(lon1, lat1, lon2, lat2):
-    return np.sqrt((lon2 - lon1) ** 2 + (lat2 - lat1) ** 2)
+#basic cleaning 
 
-data.dropna(inplace=True)
+tesla.dropna(subset=['model','color','sold_price'],inplace=True)
 
-data = data[(data.fare_amount > 0) & (data.passenger_count > 0) & (data.passenger_count <= 6)]
 
-data['trip_distance'] = euclidean_distance(data['pickup_longitude'], data['pickup_latitude'],
-                                           data['dropoff_longitude'], data['dropoff_latitude'])
+tesla['sold_price'] = pd.to_numeric(tesla['sold_price'],errors='coerce')
+tesla['miles'] = pd.to_numeric(tesla['miles'],errors='coerce')
 
-data['pickup_datetime'] = pd.to_datetime(data['pickup_datetime'])
-data['pickup_hour'] = data['pickup_datetime'].dt.hour
-data['pickup_day'] = data['pickup_datetime'].dt.dayofweek
-data['pickup_month'] = data['pickup_datetime'].dt.month
-data['pickup_year'] = data['pickup_datetime'].dt.year
+if 'trim' in tesla.columns:
+    trims = tesla['trim'].dropna().unique()
+    selected_trims = st.sidebar.multiselect("Select Trim(s):", trims,default=list(trims))
+    tesla = tesla[tesla['trim'].isin(selected_trims)]
 
-features = ['trip_distance', 'pickup_longitude', 'pickup_latitude', 'dropoff_longitude', 'dropoff_latitude',
-            'passenger_count', 'pickup_hour', 'pickup_day', 'pickup_month', 'pickup_year']
-X = data[features]
-y = data['fare_amount']
+st.title("Tesla Sales Explorer Dashboard")
 
-y = pd.cut(y, bins=[0, 10, 20, 30, 40, 50, np.inf], labels=[0, 1, 2, 3, 4, 5]).astype(int)
+# Sidebar Filters 
+model_options = st.sidebar.multiselect("Select Tesla Model(s):", tesla['model'].unique(), default=tesla['model'].unique())
+print(model_options)
+color_options = st.sidebar.multiselect("Select Tesla Color(s):", tesla['color'].unique(), default= tesla['color'].unique() )
+print(color_options)
+price_range = st.sidebar.slider(
+    "Select Sold Price Range:",
+    int(tesla['sold_price'].min()),
+    int(tesla['sold_price'].max()),
+    (30000, 90000)
+)
+print(price_range)
 
-kf = KFold(n_splits=5, shuffle=True, random_state=42)
-split_indices = list(kf.split(X))
+if 'year' in tesla.columns:
+    tesla['year'] = pd.to_numeric(tesla['year'],errors='coerce')
+    min_year = int(tesla['year'].min())
+    max_year = int(tesla['year'].max())
+    selected_year_range = st.sidebar.slider(
+        "Select Year Range:",
+        min_year,
+        max_year,
+        (min_year, max_year)
+    )
+    tesla = tesla[tesla['year'].between(*selected_year_range)]
 
-accuracies = []
-precisions = []
-recalls = []
+#Apply filters 
+filtered_tesla = tesla[
+    (tesla['model'].isin(model_options)) & 
+    (tesla['color'].isin(color_options)) &
+    (tesla['sold_price'].between(price_range[0],price_range[1]))
+]
+print(filtered_tesla) 
 
-for i, (train_index, test_index) in enumerate(split_indices):
-    X_train, X_test = X.iloc[train_index], X.iloc[test_index]
-    y_train, y_test = y.iloc[train_index], y.iloc[test_index]
-    
-    rf_model = RandomForestClassifier(n_estimators=100, random_state=42)
-    rf_model.fit(X_train, y_train)
-    y_pred_rf = rf_model.predict(X_test)
-    accuracy_rf = accuracy_score(y_test, y_pred_rf)
-    precision_rf = precision_score(y_test, y_pred_rf, average='macro')
-    recall_rf = recall_score(y_test, y_pred_rf, average='macro')
+#Summary 
+st.subheader("Summary Satistics")
+st.write(filtered_tesla.describe())
 
-    accuracies.append(accuracy_rf)
-    precisions.append(precision_rf)
-    recalls.append(recall_rf)
-    
-    print(f'Random Forest {i+1} Accuracy: {accuracy_rf}, Precision: {precision_rf}, Recall: {recall_rf}')
-    
-    tree = rf_model.estimators_[0]
-    export_graphviz(tree, out_file=f'tree_{i+1}.dot', feature_names=features, filled=True, rounded=True, special_characters=True)
-    (graph,) = pydot.graph_from_dot_file(f'tree_{i+1}.dot')
-    graph.write_png(f'tree_{i+1}.png')
+#most popular models
+st.subheader("Top Tesla Models in Selection")
+st.bar_chart(filtered_tesla['model'].value_counts())
 
-    img = Image.open(f'tree_{i+1}.png')
-    img.show()
+# most popular  colors 
+st.subheader("Top Tesla Colors")
+st.bar_chart(filtered_tesla['color'].value_counts())
 
-plt.figure(figsize=(15, 5))
+# Sold Price Distribution
+st.subheader("Sold Price Distribution")
+fig, ax = plt.subplots()
+sns.histplot(filtered_tesla['sold_price'], bins=20, kde=True, ax=ax)
+ax.set_title("Sold Price ($)")
+st.pyplot(fig)
 
-plt.subplot(1, 3, 1)
-plt.bar(range(1, 6), accuracies, color='skyblue')
-plt.xlabel('Random Forest Model')
-plt.ylabel('Accuracy')
-plt.title('Accuracy of Random Forest Models')
+st.subheader("📉 Sold Price vs Mileage")
+fig2, ax2 = plt.subplots()
+sns.scatterplot(data=filtered_tesla, x='miles', y='sold_price', hue='model', ax=ax2)
+ax2.set_xlabel('Miles')
+ax2.set_ylabel("Sold Price ($)")
+st.pyplot(fig2)
 
-plt.subplot(1, 3, 2)
-plt.bar(range(1, 6), precisions, color='lightgreen')
-plt.xlabel('Random Forest Model')
-plt.ylabel('Precision')
-plt.title('Precision of Random Forest Models')
+st.subheader("Top 3 Best Value Teslas")
 
-plt.subplot(1, 3, 3)
-plt.bar(range(1, 6), recalls, color='lightcoral')
-plt.xlabel('Random Forest Model')
-plt.ylabel('Recall')
-plt.title('Recall of Random Forest Models')
+value_df = filtered_tesla.dropna(subset=['sold_price','miles'])
 
-plt.tight_layout()
-plt.show()
+value_df = value_df.copy()
+value_df['value_score'] =(1/value_df['sold_price']) + (1/value_df['miles']+1)
 
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-nn_model = Sequential([
-    Dense(128, input_dim=len(features), activation='relu'),
-    Dense(64, activation='sigmoid'),
-    Dense(32, activation='tanh'),
-    Dense(1)
+n_top = st.sidebar.slider("How many top value Teslas to show?", 1,10,3)
+
+top_value_cars = value_df.sort_values('value_score', ascending=False).head(n_top)
+
+st.write("These teslas have the best combo of low miles and price")
+
+st.write(top_value_cars[['model','color','miles','sold_price']])
+
+st.subheader("Download Filtered Data")
+
+st.download_button(
+    label="Download Filtered Data as CSV",
+    data=filtered_tesla.to_csv(index=False),
+    file_name='filtered_tesla_data.csv',
+    mime='text/csv'
+)
+
+st.subheader("Miles vs Sold Price (with Value Highlights)")
+
+fig , ax = plt.subplots()
+
+sns.scatterplot(data= filtered_tesla , x ='miles', y = 'sold_price', hue = 'model', alpha = 0.6, ax=ax)
+
+sns.scatterplot(data= top_value_cars, x='miles', y= 'sold_price', color='red',s =150,label ='Best Value', ax=ax)
+
+ax.set_title("Tesla Price vs Miles")
+
+ax.set_xlabel("Miles")
+ax.set_ylabel("Sold Price ($)")
+st.pyplot(fig)
+
+st.subheader("Tesla Color Distrubution(Filtered Data)")
+
+color_counts = filtered_tesla['color'].value_counts()
+
+if not color_counts.empty:
+    fig,ax =plt.subplots()
+    ax.pie(
+        color_counts,
+        labels=color_counts.index,
+        autopct='%1.1f%%',
+        startangle=140
+    )
+
+    ax.axis('equal')
+    st.pyplot(fig)
+else:
+    st.write("No data available for the selected filters.")
+
+if 'year' in filtered_tesla.columns:
+    st.subheader("Average Sold Price by Year")
+    avg_price_by_year = (
+        filtered_tesla.groupby('year')['sold_price'].mean().sort_index()
+        )
+    fig, ax = plt.subplots()
+    avg_price_by_year.plot(kind ='line', marker= 'o',ax=ax)
+    ax.set_ylabel("Average Sold Price($)")
+    ax.set_xlabel("Year")
+    ax.set_title("Tesla Price Trends by Year")
+    st.pyplot(fig)
+
+ml_df  = tesla.dropna(subset = ['sold_price','miles','model','year'] )
+
+X  = ml_df[['miles','model','year']]
+y = ml_df['sold_price']
+
+preprocssor = ColumnTransformer(
+    transformers=[('model_enc', OneHotEncoder(handle_unknown='ignore'),['model'])],
+    remainder='passthrough'
+)
+pipeline = Pipeline(steps=[
+    ('preprocessor', preprocssor),
+    ('regressor', RandomForestRegressor(n_estimators  =100 , random_state = 42))
 ])
-nn_model.compile(optimizer='adam', loss='mean_squared_error', metrics=['mean_absolute_error'])
-nn_model.fit(X_train, y_train, validation_split=0.2, epochs=50, batch_size=32, verbose=0)
-y_pred_nn = nn_model.predict(X_test)
-mae_nn = mean_absolute_error(y_test, y_pred_nn)
-mse_nn = mean_squared_error(y_test, y_pred_nn)
-print(f'Neural Network MAE: {mae_nn}, MSE: {mse_nn}')
+X_train, X_test, y_train, y_test = train_test_split(X,y,test_size=0.2,random_state=42)
+pipeline.fit(X_train,y_train)
 
-plot_model(nn_model, to_file='neural_network.png', show_shapes=True, show_layer_names=True)
+st.header("Predict Tesla Sold Price")
 
-plt.figure(figsize=(12, 6))
-plt.scatter(y_test, y_pred_nn, alpha=0.3)
-plt.plot([0, max(y_test)], [0, max(y_test)], 'r--')
-plt.xlabel('Actual Fare Amount')
-plt.ylabel('Predicted Fare Amount')
-plt.title('Neural Network: Actual vs Predicted Fare Amount')
-plt.show()
+user_mileage = st.number_input("Enter miles:", min_value= 0, max_value=90000,value= 90000,step=1000)
+user_year = st.selectbox("Select Year:",sorted(tesla['year'].dropna().unique(),reverse=True))
+user_model = st.selectbox("Select Model:",tesla['model'].dropna().unique())
 
-
-
+user_input = pd.DataFrame([{
+    'miles': user_mileage,
+    'year': user_year,
+    'model': user_model
+}])
+predicted_price = pipeline.predict(user_input)[0]
+st.success(f"Estimated Sold Price: ${predicted_price:,.2f}")
 
