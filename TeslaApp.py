@@ -186,3 +186,36 @@ user_input = pd.DataFrame([{
 predicted_price = pipeline.predict(user_input)[0]
 st.success(f"Estimated Sold Price: ${predicted_price:,.2f}")
 
+st.header("🤖 Ask the Tesla Bot")
+
+user_question = st.text_input("Ask a question about Tesla cars:")
+
+if user_question:
+    response = "❓ Sorry, I didn’t understand that. Try asking about price, value, or popular models."
+
+    question = user_question.lower()
+
+    # Handle different types of basic queries
+    if "cheapest" in question:
+        cheapest = tesla.sort_values("sold_price").iloc[0]
+        response = f"The cheapest Tesla sold was a {cheapest['model']} in {cheapest['color']} for ${cheapest['sold_price']:,}."
+
+    elif "best value" in question:
+        best = top_value_cars.iloc[0]
+        response = (
+            f"The best value Tesla is a {best['model']} ({best['color']}) "
+            f"with {int(best['mileage'])} miles, sold for ${best['sold_price']:,}."
+        )
+
+    elif "average price" in question or "how much" in question:
+        for model in tesla['model'].unique():
+            if model.lower() in question:
+                avg_price = tesla[tesla['model'] == model]['sold_price'].mean()
+                response = f"The average price of a {model} is ${avg_price:,.2f}."
+                break
+
+    elif "popular" in question or "most owned" in question:
+        most_common = tesla['model'].value_counts().idxmax()
+        response = f"The most popular Tesla model in the dataset is the {most_common}."
+
+    st.success(response)
