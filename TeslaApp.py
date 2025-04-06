@@ -217,5 +217,8 @@ if user_question:
     elif "popular" in question or "most owned" in question:
         most_common = tesla['model'].value_counts().idxmax()
         response = f"The most popular Tesla model in the dataset is the {most_common}."
+    elif "expensive" in question:
+        expensive = tesla.sort_values("sold_price", ascending=False).iloc[0]
+        response = f"The most expensive Tesla sold was a {expensive['model']} in {expensive['color']} for ${expensive['sold_price']:,}."
 
     st.success(response)
